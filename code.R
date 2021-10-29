@@ -101,7 +101,7 @@ rets <- Return.calculate(data, method = "discrete")
 
 
 
-# Estimate Value at Risk (should we again use 1-week Var?).
+# Estimate Value at Risk (again use 1-week VaR?).
 
 
 
