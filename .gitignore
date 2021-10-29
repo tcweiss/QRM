@@ -37,3 +37,10 @@ vignettes/*.pdf
 
 # R Environment Variables
 .Renviron
+
+# Annoying system-created files which should never be checked in. What does ** do?
+# I want it to cover a .DS_Store in the highest level, and in any lower level.
+
+*.Rproj
+.DS_Store
+**rsconnect
