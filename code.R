@@ -39,7 +39,7 @@ rets <- Return.calculate(data, method = "discrete")
 ###       (i) MODELS         ###
 ################################
 
-# M1: Portfolio returns with empirically distributed returns.
+# M1: Portfolio returns with empirically distributed returns..
 
 
 
