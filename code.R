@@ -4,6 +4,7 @@ library(readxl)
 library(xts)
 library(PerformanceAnalytics)
 library(stats4)
+library(copula)
 
 
 ################################
