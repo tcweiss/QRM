@@ -1,5 +1,6 @@
 
 library(tidyverse)
+library(magrittr)
 library(readxl)
 library(xts)
 library(PerformanceAnalytics)
@@ -22,17 +23,17 @@ first <- as.matrix(data[,-1])
 second <- as.Date(data$Dates)
 
 
-# Create xts object with raw data.
+# Create xts object from raw data.
 
 data <- xts(first, second)
 rm(first)
 rm(second)
 
 
-# Create xts object with net returns.
+# Create xts object with net returns and extract relevant stocks.
 
 rets <- Return.calculate(data, method = "discrete")
-
+rets <- rets[-1, c("AAPL", "TSLA")]
 
 
 
@@ -40,7 +41,7 @@ rets <- Return.calculate(data, method = "discrete")
 ###       (i) MODELS         ###
 ################################
 
-# M1: Portfolio returns with empirically distributed returns..
+# M1: Portfolio returns with empirically distributed returns.
 
 
 
