@@ -5,7 +5,9 @@ library(readxl)
 library(xts)
 library(PerformanceAnalytics)
 library(stats4)
-library(copula)
+library(VineCopula)
+library(Rfast)
+library(MASS)
 
 
 ################################
@@ -43,18 +45,45 @@ rets <- rets[-1, c("AAPL", "TSLA")]
 
 # M1: Portfolio returns with empirically distributed returns.
 
+M1 <- rets
+
 
 
 # M2: Portfolio returns with bivariate Gaussian distributed returns.
 
+M2 <- mvnorm.mle(rets)
 
 
 # M3: Portfolio returns with Gaussian distributed returns.
 
+u1 <- pnorm((rets$AAPL-M2$mu[1])/sqrt(M2$sigma[1,1]))
+u2 <- pnorm((rets$TSLA-M2$mu[2])/sqrt(M2$sigma[2,2]))
+
+M3 <- BiCopEst(u1, u2, family = 4, method = "mle")
 
 
 # M4: Portfolio returns with t-distributed returns.
 
+eps1 <- (rets$AAPL-M2$mu[1])/sqrt(M2$sigma[1,1])
+eps2 <- (rets$TSLA-M2$mu[2])/sqrt(M2$sigma[2,2])
+
+v1 <- fitdistr(eps1, densfun = "t")$estimate[3]
+v2 <- fitdistr(eps2, densfun = "t")$estimate[3]
+
+u1 <- pt(eps1, v1)
+u2 <- pt(eps2, v2)
+
+M4 <- BiCopEst(u1, u2, family = 1, method = "mle")
+
+
+rm("eps1")
+rm("eps2")
+rm("u1")
+rm("u2")
+rm("v1")
+rm("v2")
+rm("m")
+rm("n")
 
 
 
@@ -65,15 +94,43 @@ rets <- rets[-1, c("AAPL", "TSLA")]
 
 # Create 10k simulations using model M1.
 
+pf_1 <- Return.portfolio(M1, 
+                         weights = c(0.3, 0.7), 
+                         rebalance_on = "week", 
+                         geometric = TRUE)
 
 
-# Estimate 1-day Value at Risk.
+rets_1 <- sample(pf_1, 10000, replace = TRUE)
 
 
 
-# Compute expected shortfalls at confidence levels of 90%, 95% and 99%.
+# Estimate 1-week VaR and ES at confidence levels of 90%, 95% and 99%.
 
+results_1 <- tibble("alpha" = rep(NA_real_, 3),
+                    "VaR" = rep(NA_real_, 3),
+                    "ES" = rep(NA_real_, 3))
 
+conf <- c(0.9, 0.95, 0.99)
+
+for (i in 1:3) {
+  
+  results_1$alpha[i] <- conf[i]
+  
+  results_1$VaR[i] <- VaR(rets_1, 
+                          p = conf[i], 
+                          method = "historical", 
+                          invert = FALSE)
+  
+  results_1$ES[i] <- ES(rets_1, 
+                        p = conf[i],
+                        method = "historical", 
+                        invert = FALSE, 
+                        operational = FALSE)
+  
+}
+
+rm("i")
+rm("conf")
 
 
 ################################
