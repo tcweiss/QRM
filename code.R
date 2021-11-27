@@ -187,18 +187,11 @@ ES <- function(x, p) {
           VAR <- x[Fn(x) >= 1-p] %>% 
             min(.)*(-1)
       
-          TCE <- -mean(x[x< -VAR])
+          TCE <- -mean(x[x<=-VAR])
   
-          return(TCE + ( (1/(1-p)) * (length(x[x< -VAR])/length(x)) - 1) * (TCE-VAR))
+          return(TCE + ((1/(1-p))*(length(x[x<=-VAR])/length(x)) - 1)*(TCE-VAR))
 }
 
-
-
-
-
-a <- c(seq(-10, 0, 1), seq(1, 10, 1))
-
-b <- xts(a, seq(as.Date("2000-01-01"), by = 1, length.out = 21))
 
 
 # Create 10k simulations using portfolio 1. Since this is just a time series of
@@ -222,11 +215,7 @@ for (i in 1:3) {
   
   results_1$VaR[i] <- VaR(rets_1, p = conf[i])
   
-  # results_1$ES[i] <- ES(rets_1, 
-  #                       p = conf[i],
-  #                       method = "historical", 
-  #                       invert = FALSE, 
-  #                       operational = FALSE)
+  results_1$ES[i] <- ES(rets_1, p = conf[i])
   
 }
 
