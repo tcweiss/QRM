@@ -8,6 +8,8 @@ library(stats4)
 library(VineCopula)
 library(Rfast)
 library(MASS)
+library(psych)
+library(gridExtra)
 
 
 ################################
@@ -138,16 +140,160 @@ rm("conf")
 ################################
 
 
-# Create 10k simulations using models M2 and M4.
+# Create 10k simulations using models M2 and M4. I add some fantasy dates in the
+# second step since PerformanceAnalytics only accepts time series (will be
+# deleted afterwards).
+ 
+pf_2 <- mvrnorm(10000, mu = M2$mu, Sigma = M2$sigma, empirical = TRUE) %>% 
+              as_tibble(.) 
+
+date <- seq(as.Date("2000/1/1"), by = "weeks", length.out = 10000)
+
+pf_2 <- xts(pf_2, date)
+
+rets_2 <- Return.portfolio(pf_2, 
+              weights = c(0.3, 0.7), 
+              rebalance_on = "week", 
+              geometric = TRUE)
 
 
 
-# Estimate 1-week Value at Risk.
+n <- 10000
+rho <- M4$par
+
+sim.GC <- function(n, rho, qmarg1, qmarg2) {
+  
+    R <- rbind(c(1,rho),c(rho,1))
+    dat <- rmvnorm(n, mu = c(0,0), sigma = R)
+    dat[,1] <- qmarg1(pnorm(dat[,1]))
+    dat[,2] <- qmarg2(pnorm(dat[,2]))
+    return(dat)
+    
+}
+
+set.seed(1234)
+
+# gaussian marginals
+
+q1 <- function(p) { 
+  
+    qnorm(p, mean = M2$mu[1], sd = sqrt(M2$sigma[1,1]))
+  
+}
+
+q2 <- function(p) {
+  
+  qnorm(p, mean = M2$mu[2], sd = sqrt(M2$sigma[2,2]))
+  
+}
+
+rets_M4 <- sim.GC(n, rho = rho, q1, q2)
+rets_M4 <- data.frame(AAPL = rets_M4[,1], TSLA = rets_M4[,2])
 
 
+# plot results
 
-# Compute expected shortfalls at confidence levels of 90%, 95% and 99%.
+p <- ggplot(rets_M4, aes(AAPL, TSLA)) + 
+          geom_point() + 
+          theme(axis.text.x = element_text(size = 14), 
+                axis.text.y = element_text(size = 14)) +
+          xlab("Apple") + ylab("Tesla") + 
+          ggtitle(expression(paste(rho, "=0.5")))
 
+ggExtra::ggMarginal(p, type = "histogram")
+
+pairs.panels(rets_M4)
+
+pf_M4 <- rets_M4$AAPL*0.3 + rets_M4$TSLA*0.7
+
+
+# Estimate 1-week Value at Risk using models M4
+
+VAR_M490 <- VaR(pf_M4, 0.9, method = "gaussian", invert = FALSE, operational = FALSE)
+VAR_M495 <- VaR(pf_M4, 0.95, method = "gaussian", invert = FALSE, operational = FALSE)
+VAR_M499 <- VaR(pf_M4, 0.99, method = "gaussian", invert = FALSE, operational = FALSE)
+VAR_M4 <- c(VAR_M490,VAR_M495,VAR_M499)
+
+
+# Compute expected shortfalls at confidence levels of 90%, 95% and 99% using models M4
+
+CVAR_M490 <- CVaR(pf_M4, 0.9, method = "gaussian", invert = FALSE, operational = FALSE)
+CVAR_M495 <- CVaR(pf_M4, 0.95, method = "gaussian", invert = FALSE, operational = FALSE)
+CVAR_M499 <- CVaR(pf_M4, 0.99, method = "gaussian", invert = FALSE, operational = FALSE)
+CVAR_M4 <- c(CVAR_M490,CVAR_M495,CVAR_M499)
+
+
+# Display result M4
+
+result_M4 <- data.frame("VaR_M4" = VAR_M4, "ES_M4" = CVAR_M4)
+row.names(result_M4) <- c("90%", "95%", "99%")
+grid.table(result_M4)
+
+
+# Estimate 1-week VaR and ES at confidence levels of 90%, 95% and 99%.
+
+
+results_2 <- tibble("alpha" = rep(NA_real_, 3),
+                    "VaR" = rep(NA_real_, 3),
+                    "ES" = rep(NA_real_, 3))
+
+conf <- c(0.9, 0.95, 0.99)
+
+for (i in 1:3) {
+  
+  results_2$alpha[i] <- conf[i]
+  
+  results_2$VaR[i] <- VaR(rets_2, 
+                          p = conf[i], 
+                          method = "historical", 
+                          invert = FALSE)
+  
+  results_2$ES[i] <- ES(rets_2, 
+                        p = conf[i],
+                        method = "historical", 
+                        invert = FALSE, 
+                        operational = FALSE)
+  
+}
+
+
+results_3 <- tibble("alpha" = rep(NA_real_, 3),
+                    "VaR" = rep(NA_real_, 3),
+                    "ES" = rep(NA_real_, 3))
+
+rets_M4 <- xts(rets_M4, date)
+
+
+results_3 <- tibble("alpha" = rep(NA_real_, 3),
+                    "VaR" = rep(NA_real_, 3),
+                    "ES" = rep(NA_real_, 3))
+
+conf <- c(0.9, 0.95, 0.99)
+
+results_3 <- tibble("alpha" = rep(NA_real_, 3),
+                    "VaR" = rep(NA_real_, 3),
+                    "ES" = rep(NA_real_, 3))
+
+for (i in 1:3) {
+  
+  results_3$alpha[i] <- conf[i]
+  
+  results_3$VaR[i] <- VaR(rets_M4, 
+                          p = conf[i], 
+                          method = "historical", 
+                          invert = FALSE)
+  
+  results_3$ES[i] <- ES(rets_M4, 
+                        p = conf[i],
+                        method = "historical", 
+                        invert = FALSE, 
+                        operational = FALSE)
+  
+}
+
+
+rm("i")
+rm("conf")
 
 
 
@@ -172,12 +318,56 @@ rm("conf")
 # Estimate 1-week Value at Risk over 100-day rolling window using models M2 and
 # M4.
 
+date <- seq(as.Date("2013-01-01"), by = "week", length.out = 10000)
+
+rets_2 <- xts(coredata(rets_2), date)
+
+
+rets_4 <- xts(coredata(rets_M4), date)
+
+
+rets_4 <- Return.portfolio(rets_4, 
+                          weights = c(0.3, 0.7), 
+                          rebalance_on = "week", 
+                          geometric = TRUE)
+
+            
+roll_2 <- rollapply(rets_2, width = 100, FUN = VaR,  p = 0.95, method = "historical", invert = FALSE) %>%
+            na.trim(.)
+
+roll_4 <- rollapply(rets_4, width = 100, FUN = VaR,  p = 0.95, method = "historical", invert = FALSE) %>%
+            na.trim(.)
 
 
 # Compute no. of violations using next out-of-sample portfolio return.
 
 
+rets_2 <- rets_2["2014-11-25/"] %>% 
+              lag.xts(., -1)
+
+roll_2 <- cbind(roll_2, rets_2)
+
+colnames(roll_2) <- c("VaR", "pf")
+              
+rets_4 <- rets_4["2014-11-25/"] %>% 
+              lag.xts(., -1)
+
+roll_4 <- cbind(roll_4, rets_4)
+
+names(roll_4) <- c("VaR", "pf")
 
 
-
+viol_2 <- roll_2[-9901,] %>%
+            coredata() %>% 
+            as_tibble() %>% 
+            mutate(Violation = (VaR + pf)<0) %>% 
+            select(Violation) %>% 
+            summarise(., "Perc. Violations" = sum(Violation)/n())
+            
+viol_4 <- roll_4[-9901,] %>%
+            coredata() %>% 
+            as_tibble() %>% 
+            mutate(Violation = (VaR + pf)<0) %>% 
+            select(Violation) %>% 
+            summarise(., "Perc. Violations" = sum(Violation)/n())
 
