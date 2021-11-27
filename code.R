@@ -49,6 +49,8 @@ rm(data)
 rm(prices)
 rm(dates)
 
+
+
 ################################
 ###       (i) MODELS         ###
 ################################
@@ -63,7 +65,7 @@ M1 <- rets
 # likelihood estimation. If a bivariate set of returns X=(x1, x2) is
 # (supposedly) normally distributed, then Y=exp(X) has a multivariate log-normal
 # distribution with expectation E[Y_i] = exp(µ_i + 0.5*Σ_ii) and covariance
-# matrix Var(Y_ij) = exp(µ_i+µ_j+0.5(Σ_ii+Σ_jj))*(exp(Σ_ij)-1). The mvnorm.mle
+# matrix Var(Y_ij) = exp(µ_i+µ_j+0.5(Σ_ii+Σ_jj))*(exp(Σ_ij)-1). The mvnorm.mle()
 # function applies this assumption to the stock return data and estimates the
 # corresponding mean and covariance matrix using MLE-estimation.
 
@@ -72,10 +74,13 @@ M2 <- mvnorm.mle(rets)
 
 # M3: Stock returns with bivariate Gaussian distribution and Gumbel-copula. The
 # parameters of the bivariate Gaussian are given by M2 (see previous code
-# chunk); we therefore still need to get the Gumbel-copula. The first
-# step is to find u1 and u2, which we do by computing the normal
-# distribution (using pnorm) of the standardizing net returns (using mu and
-# sd from M2).
+# chunk); we therefore still need to get the Gumbel-copula. The first step is to
+# find u1 and u2, which we do by computing the normal distribution (using pnorm)
+# of the standardizing net returns (using mu and sd from M2). These results are
+# then passed to BiCopEst(), where we set family=4 (for Gumbel-copula) and
+# method=mle (for MLE estimation). The BiCopEst() function uses u1 and u2 in the
+# formula for the Gumbel-copula and uses MLE to estimate the only unknown
+# parameter, θ.
 
 u1 <- pnorm((rets$AAPL-M2$mu[1])/sqrt(M2$sigma[1,1]))
 u2 <- pnorm((rets$TSLA-M2$mu[2])/sqrt(M2$sigma[2,2]))
@@ -83,7 +88,18 @@ u2 <- pnorm((rets$TSLA-M2$mu[2])/sqrt(M2$sigma[2,2]))
 M3 <- BiCopEst(u1, u2, family = 4, method = "mle")
 
 
-# M4: Portfolio returns with t-distributed returns.
+# M4: Stock returns with t-distribution and Gaussian copula. The first step is
+# to solve for the ε of each stock, which in our case means standardizing net
+# returns like in M3 (i.e., we use the parameters from M2). One then needs to
+# find the degrees of freedom of each ε. This is done in the next two lines. The
+# fitdistr() function uses the respective ε as input for the standardized
+# t-distribution, given by ft,1(x; ν) = Γ[(ν+1)/2]/[sqrt(vπ)Γ(v/2)]*(1+(x^2)/v)^-[(v+1)/2], 
+# and uses MLE to find the only unkown parameter, v. After obtaining estimates
+# the two v, we can find u1 and u2. The approach similar to the one in M3, but
+# because we have a t-distribution, we use pt() to get the t-distribution and we
+# input both ε and the respective v. Finally, we use u1 and u2 as input for
+# BiCopEst() again, but we set family=1 to compute the parameter (rho) of a
+# Gaussian copula.
 
 eps1 <- (rets$AAPL-M2$mu[1])/sqrt(M2$sigma[1,1])
 eps2 <- (rets$TSLA-M2$mu[2])/sqrt(M2$sigma[2,2])
@@ -97,6 +113,8 @@ u2 <- pt(eps2, v2)
 M4 <- BiCopEst(u1, u2, family = 1, method = "mle")
 
 
+# Clean up environment.
+
 rm("eps1")
 rm("eps2")
 rm("u1")
@@ -107,19 +125,30 @@ rm("m")
 rm("n")
 
 
-
 ################################
 ###      (ii) VaR M1         ###
 ################################
 
-
-# Create 10k simulations using model M1.
+# Create portfolio using M1. The Return.portfolio() function computes the
+# portfolio returns using a time series object of asset returns. These returns
+# are given by the first argument, which in our case contains the empirical net
+# return distributions of AAPL and TSLA. The second argument specifies how these
+# returns should be weighted when computing portfolio returns. Third one
+# indicates that the weighing should take place every week, or in our case every
+# observation. Without doing this, weights would be applied in the first row
+# only, which is not what we want. Finally, we specify that the (weighted)
+# geometric mean should be used. While the latter makes no noticable difference,
+# it seems like the more correct way to compute portfolio returns.
 
 pf_1 <- Return.portfolio(M1, 
                          weights = c(0.3, 0.7), 
                          rebalance_on = "week", 
                          geometric = TRUE)
 
+
+# Create 10k simulations using portfolio 1. Since this is just a time series of
+# return, we directly sample from the pf_1 object created above. It has less
+# than 10k observations, so we set replace=TRUE.
 
 rets_1 <- sample(pf_1, 10000, replace = TRUE)
 
