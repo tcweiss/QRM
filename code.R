@@ -16,47 +16,66 @@ library(gridExtra)
 ###          SETUP           ###
 ################################
 
-# Import data.
+# Import data from Excel into R.
 
 data <- read_excel("data.xlsx")
 
 
-# Extract coredata and index.
+# Extract stock prices (as a matrix) and dates (as a vector).
 
-first <- as.matrix(data[,-1])
-second <- as.Date(data$Dates)
-
-
-# Create xts object from raw data.
-
-data <- xts(first, second)
-rm(first)
-rm(second)
+prices <- as.matrix(data[,-1])
+dates <- as.Date(data$Dates)
 
 
-# Create xts object with net returns and extract relevant stocks.
+# Create xts (time series) object using price matrix and date vector.
+
+data <- xts(prices, dates)
+
+
+# Create xts time series object net returns from stock price data. For a price
+# P(t) in a given period t, Return.calculate() computes the net return using
+# [P(t)-P(t-1)]/P/(t-1). The output is a xts object with net returns for all
+# stocks in the data set. The second line then removes the first line from this
+# object (= NA due to return calculation), and extracts two specific stocks
+# which will be needed from here on (AAPL and TSLA).
 
 rets <- Return.calculate(data, method = "discrete")
 rets <- rets[-1, c("AAPL", "TSLA")]
 
 
+# Clean up environment.
+
+rm(data)
+rm(prices)
+rm(dates)
 
 ################################
 ###       (i) MODELS         ###
 ################################
 
-# M1: Portfolio returns with empirically distributed returns.
+# M1: Stock returns with empirical distribution. No further
+# calculation necessary.
 
 M1 <- rets
 
 
-
-# M2: Portfolio returns with bivariate Gaussian distributed returns.
+# M2: Stock returns with bivariate Gaussian distribution using maximum
+# likelihood estimation. If a bivariate set of returns X=(x1, x2) is
+# (supposedly) normally distributed, then Y=exp(X) has a multivariate log-normal
+# distribution with expectation E[Y_i] = exp(µ_i + 0.5*Σ_ii) and covariance
+# matrix Var(Y_ij) = exp(µ_i+µ_j+0.5(Σ_ii+Σ_jj))*(exp(Σ_ij)-1). The mvnorm.mle
+# function applies this assumption to the stock return data and estimates the
+# corresponding mean and covariance matrix using MLE-estimation.
 
 M2 <- mvnorm.mle(rets)
 
 
-# M3: Portfolio returns with Gaussian distributed returns.
+# M3: Stock returns with bivariate Gaussian distribution and Gumbel-copula. The
+# parameters of the bivariate Gaussian are given by M2 (see previous code
+# chunk); we therefore still need to get the Gumbel-copula. The first
+# step is to find u1 and u2, which we do by computing the normal
+# distribution (using pnorm) of the standardizing net returns (using mu and
+# sd from M2).
 
 u1 <- pnorm((rets$AAPL-M2$mu[1])/sqrt(M2$sigma[1,1]))
 u2 <- pnorm((rets$TSLA-M2$mu[2])/sqrt(M2$sigma[2,2]))
