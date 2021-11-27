@@ -43,11 +43,73 @@ rets <- Return.calculate(data, method = "discrete")
 rets <- rets[-1, c("AAPL", "TSLA")]
 
 
+# Function to compute VaR. The if() condition first checks the input data type
+# and converts it to a vector. The ecdf() function then computes the empirical
+# cumulative distribution of this vector. Finally, the last code chunk computes
+# VaR by using the definition of the generalized inverse. It subsets the vector
+# to only include values for which the cumulative distribution gives at least
+# the desired confidence level, and then returns the smallest one.
+
+VaR <- function(x, p) {
+  
+  if(is.xts(x) == TRUE) {
+    
+    x <- x %>% 
+      coredata() %>% 
+      as.vector() 
+    
+  } else {
+    
+    x <- as.vector(x)
+    
+  }
+  
+  Fn <- ecdf(x)
+  
+  x[Fn(x) >= 1-p] %>% 
+    min(.)*(-1) %>% 
+    return()
+  
+}
+
+
+# Function to compute ES. The first three chunks are from the VaR formula above.
+# However, instead of returning VaR, the function saves it in an object (VAR),
+# which is the used to compute the tail conditional expectation (TCE). Finally,
+# the last line applies the formula from chapter 3 to compute the expected
+# shortfall (ES).
+
+ES <- function(x, p) {
+  
+  if(is.xts(x) == TRUE) {
+    
+    x <- x %>% 
+      coredata() %>% 
+      as.vector() 
+    
+  } else {
+    
+    x <- as.vector(x)
+    
+  }
+  
+  Fn <- ecdf(x)
+  
+  VAR <- x[Fn(x) >= 1-p] %>% 
+    min(.)*(-1)
+  
+  TCE <- -mean(x[x<=-VAR])
+  
+  return(TCE + ((1/(1-p))*(length(x[x<=-VAR])/length(x)) - 1)*(TCE-VAR))
+  
+}
+
+
 # Clean up environment.
 
-rm(data)
-rm(prices)
-rm(dates)
+rm("data")
+rm("prices")
+rm("dates")
 
 
 ################################
@@ -145,63 +207,15 @@ pf_1 <- Return.portfolio(M1,
                          geometric = TRUE)
 
 
-VaR <- function(x, p) {
-        
-        if(is.xts(x) == TRUE) {
-          
-          x <- x %>% 
-                coredata() %>% 
-                as.vector() 
-          
-        } else {
-            
-          x <- as.vector(x)
-          
-          }
-        
-        Fn <- ecdf(x)
-        
-        x[Fn(x) >= 1-p] %>% 
-          min(.)*(-1) %>% 
-          return()
-        
-}
-
-
-ES <- function(x, p) {
-  
-          if(is.xts(x) == TRUE) {
-            
-            x <- x %>% 
-              coredata() %>% 
-              as.vector() 
-            
-          } else {
-            
-            x <- as.vector(x)
-            
-          }
-          
-          Fn <- ecdf(x)
-          
-          VAR <- x[Fn(x) >= 1-p] %>% 
-            min(.)*(-1)
-      
-          TCE <- -mean(x[x<=-VAR])
-  
-          return(TCE + ((1/(1-p))*(length(x[x<=-VAR])/length(x)) - 1)*(TCE-VAR))
-}
-
-
-
 # Create 10k simulations using portfolio 1. Since this is just a time series of
 # returns, we directly sample from the pf_1 object created above. It has less
 # than 10k observations, so we set replace=TRUE.
 
-rets_1 <- sample(pf_1, 10000, replace = TRUE)
+rets_M1 <- sample(pf_1, 10000, replace = TRUE)
 
 
-# Estimate 1-week VaR and ES at confidence levels of 90%, 95% and 99%.
+# Create empty tibble to store results and vector containing different
+# confidence levels.
 
 results_1 <- tibble("alpha" = rep(NA_real_, 3),
                     "VaR" = rep(NA_real_, 3),
@@ -209,13 +223,19 @@ results_1 <- tibble("alpha" = rep(NA_real_, 3),
 
 conf <- c(0.9, 0.95, 0.99)
 
+
+# Computing VaR and ES. For every of the three confidence levels, the loop
+# computes VaR and ES of the simulated portfolio return series. Both measures
+# and the corresponding confidence level are stored in the tibble created
+# before.
+
 for (i in 1:3) {
   
   results_1$alpha[i] <- conf[i]
   
-  results_1$VaR[i] <- VaR(rets_1, p = conf[i])
+  results_1$VaR[i] <- VaR(rets_M1, p = conf[i])
   
-  results_1$ES[i] <- ES(rets_1, p = conf[i])
+  results_1$ES[i] <- ES(rets_M1, p = conf[i])
   
 }
 
@@ -224,7 +244,7 @@ for (i in 1:3) {
 
 rm("i")
 rm("conf")
-
+rm("rets_M1")
 
 ################################
 ###    (iii) VaR M2 & M4     ###
