@@ -182,8 +182,6 @@ rm("u1")
 rm("u2")
 rm("v1")
 rm("v2")
-rm("m")
-rm("n")
 
 
 ################################
@@ -201,7 +199,7 @@ rm("n")
 # geometric mean should be used. While the latter makes no noticable difference,
 # it seems like the more correct way to compute portfolio returns.
 
-pf_1 <- Return.portfolio(M1, 
+pf_M1 <- Return.portfolio(M1, 
                          weights = c(0.3, 0.7), 
                          rebalance_on = "week", 
                          geometric = TRUE)
@@ -245,100 +243,76 @@ for (i in 1:3) {
 rm("i")
 rm("conf")
 rm("rets_M1")
+rm("pf_M1")
+rm("results_1")
+
 
 ################################
 ###    (iii) VaR M2 & M4     ###
 ################################
 
+# Simulate 10k net returns for M2. The mvrnorm() function generates random
+# values for a multivariate Gaussian distribution, given multiple parameters.
+# The first one is the number of simulations, namely 10k. The next two are the
+# means and the covariance matrix, which have been derived earlier using MLE. To
+# preserve the mean and covariance structure, we set empirical = TRUE.
 
-# Create 10k simulations using models M2 and M4. I add some fantasy dates in the
-# second step since PerformanceAnalytics only accepts time series (will be
-# deleted afterwards).
- 
-pf_2 <- mvrnorm(10000, mu = M2$mu, Sigma = M2$sigma, empirical = TRUE) %>% 
-              as_tibble(.) 
-
-date <- seq(as.Date("2000/1/1"), by = "weeks", length.out = 10000)
-
-pf_2 <- xts(pf_2, date)
-
-rets_2 <- Return.portfolio(pf_2, 
-              weights = c(0.3, 0.7), 
-              rebalance_on = "week", 
-              geometric = TRUE)
+values <- mvrnorm(10000, mu = M2$mu, Sigma = M2$sigma, empirical = TRUE) %>% 
+          as.data.frame() 
 
 
+# Create xts object with simulated returns from above. While not required here,
+# the simulated returns of M2 are also used in question v), where they need to
+# be in the form of a time series starting on 1 Jan 2013. Therefore, we create a
+# corresponding vector of weekly dates, which is then used together with the
+# simulated returns to create a xts object.
 
-n <- 10000
-rho <- M4$par
+dates <- seq(as.Date("2013-01-01"), by = "weeks", length.out = 10000)
 
-sim.GC <- function(n, rho, qmarg1, qmarg2) {
-  
-    R <- rbind(c(1,rho),c(rho,1))
-    dat <- rmvnorm(n, mu = c(0,0), sigma = R)
-    dat[,1] <- qmarg1(pnorm(dat[,1]))
-    dat[,2] <- qmarg2(pnorm(dat[,2]))
-    return(dat)
-    
-}
+rets_M2 <- xts(values, dates)
 
-set.seed(1234)
 
-# gaussian marginals
+# Compute weighted portfolio for M2. We use the same function and additional
+# arguments as for M1.
 
-q1 <- function(p) { 
-  
-    qnorm(p, mean = M2$mu[1], sd = sqrt(M2$sigma[1,1]))
-  
-}
+pf_2 <- Return.portfolio(rets_2, 
+                         weights = c(0.3, 0.7), 
+                         rebalance_on = "week", 
+                         geometric = TRUE)
 
-q2 <- function(p) {
-  
-  qnorm(p, mean = M2$mu[2], sd = sqrt(M2$sigma[2,2]))
-  
-}
+########
 
-rets_M4 <- sim.GC(n, rho = rho, q1, q2)
-rets_M4 <- data.frame(AAPL = rets_M4[,1], TSLA = rets_M4[,2])
 
+
+# Simulated returns M4
+n <- 10000 # number of simulations
+rho <- M4$par # correlation parameter Gaussian-Copula
+
+# Build the bivariate distribution
+dist_M4 <- mvdc(normalCopula(param = rho, dim = 2), margins = c("norm","norm"),
+                paramMargins = list(list(mean = M2$mu[1], sd = sqrt(M2$sigma[1,1])), list(mean = M2$mu[2], sd = sqrt(M2$sigma[2,2]))))
+
+# Sample 1000 observations from the distribution
+rets_M4 <- rMvdc(10000, dist_M4) %>% 
+  as_tibble(.)
+colnames(rets_M4) <- c("AAPL", "TSLA")
 
 # plot results
-
 p <- ggplot(rets_M4, aes(AAPL, TSLA)) + 
-          geom_point() + 
-          theme(axis.text.x = element_text(size = 14), 
-                axis.text.y = element_text(size = 14)) +
-          xlab("Apple") + ylab("Tesla") + 
-          ggtitle(expression(paste(rho, "=0.5")))
+  geom_point() + 
+  theme(axis.text.x = element_text(size = 14), 
+        axis.text.y = element_text(size = 14)) +
+  xlab("Apple") + ylab("Tesla") + 
+  ggtitle(expression(paste(rho, "=0.5")))
 
 ggExtra::ggMarginal(p, type = "histogram")
 
 pairs.panels(rets_M4)
 
-pf_M4 <- rets_M4$AAPL*0.3 + rets_M4$TSLA*0.7
+###########
 
 
-# Estimate 1-week Value at Risk using models M4
 
-VAR_M490 <- VaR(pf_M4, 0.9, method = "gaussian", invert = FALSE, operational = FALSE)
-VAR_M495 <- VaR(pf_M4, 0.95, method = "gaussian", invert = FALSE, operational = FALSE)
-VAR_M499 <- VaR(pf_M4, 0.99, method = "gaussian", invert = FALSE, operational = FALSE)
-VAR_M4 <- c(VAR_M490,VAR_M495,VAR_M499)
-
-
-# Compute expected shortfalls at confidence levels of 90%, 95% and 99% using models M4
-
-CVAR_M490 <- CVaR(pf_M4, 0.9, method = "gaussian", invert = FALSE, operational = FALSE)
-CVAR_M495 <- CVaR(pf_M4, 0.95, method = "gaussian", invert = FALSE, operational = FALSE)
-CVAR_M499 <- CVaR(pf_M4, 0.99, method = "gaussian", invert = FALSE, operational = FALSE)
-CVAR_M4 <- c(CVAR_M490,CVAR_M495,CVAR_M499)
-
-
-# Display result M4
-
-result_M4 <- data.frame("VaR_M4" = VAR_M4, "ES_M4" = CVAR_M4)
-row.names(result_M4) <- c("90%", "95%", "99%")
-grid.table(result_M4)
 
 
 # Estimate 1-week VaR and ES at confidence levels of 90%, 95% and 99%.
