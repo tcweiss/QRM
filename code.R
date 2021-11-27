@@ -6,15 +6,20 @@ library(xts)
 library(PerformanceAnalytics)
 library(stats4)
 library(VineCopula)
+library(copula)
 library(Rfast)
 library(MASS)
 library(psych)
 library(gridExtra)
 
 
-################################
-###          SETUP           ###
-################################
+###########################################################################
+###########################################################################
+###                                                                     ###
+###                                SETUP                                ###
+###                                                                     ###
+###########################################################################
+###########################################################################
 
 # Import data from Excel into R.
 
@@ -112,8 +117,17 @@ rm("prices")
 rm("dates")
 
 
+
+###########################################################################
+###########################################################################
+###                                                                     ###
+###                             COMPUTATION                             ###
+###                                                                     ###
+###########################################################################
+###########################################################################
+
 ################################
-###       (i) MODELS         ###
+###       (i) Models         ###
 ################################
 
 # M1: Stock returns with empirical distribution. No further
@@ -146,7 +160,7 @@ M2 <- mvnorm.mle(rets)
 u1 <- pnorm((rets$AAPL-M2$mu[1])/sqrt(M2$sigma[1,1]))
 u2 <- pnorm((rets$TSLA-M2$mu[2])/sqrt(M2$sigma[2,2]))
 
-M3 <- BiCopEst(u1, u2, family = 4, method = "mle")
+test <- BiCopEst(u1, u2, family = 1, method = "mle")
 
 
 # M4: Stock returns with t-distribution and Gaussian copula. The first step is
@@ -182,7 +196,6 @@ rm("u1")
 rm("u2")
 rm("v1")
 rm("v2")
-
 
 ################################
 ###      (ii) VaR M1         ###
@@ -230,9 +243,7 @@ conf <- c(0.9, 0.95, 0.99)
 for (i in 1:3) {
   
   results_1$alpha[i] <- conf[i]
-  
   results_1$VaR[i] <- VaR(rets_M1, p = conf[i])
-  
   results_1$ES[i] <- ES(rets_M1, p = conf[i])
   
 }
@@ -268,111 +279,85 @@ values <- mvrnorm(10000, mu = M2$mu, Sigma = M2$sigma, empirical = TRUE) %>%
 # simulated returns to create a xts object.
 
 dates <- seq(as.Date("2013-01-01"), by = "weeks", length.out = 10000)
-
 rets_M2 <- xts(values, dates)
 
 
 # Compute weighted portfolio for M2. We use the same function and additional
 # arguments as for M1.
 
-pf_2 <- Return.portfolio(rets_2, 
+pf_M2 <- Return.portfolio(rets_M2, 
                          weights = c(0.3, 0.7), 
                          rebalance_on = "week", 
                          geometric = TRUE)
 
-########
+
+# Simulate 10k net returns for M4. The mvdc() function computes parameters for
+# the multivariate distribution of a copula, and takes three arguments. The
+# first one specifies the copula type, which is Gaussian, to which we can pass
+# the rho obtained earlier using MLE, and the dimension, which in our case is
+# the number of stocks. The second argument specifies that the distributions of
+# both marginals, which we set to normal. Third, we enter two lists, each of
+# which contains the desired mean and standard deviation for one of the
+# marginals. The values used here are again the MLE estimates from M2, which
+# were used initially to compute the correlation parameter of the copula. The
+# parameters obtained by this code will contain not just the marginal
+# parameters, but also the correlation parameter.
+
+dist_M4 <- mvdc(normalCopula(param = M4$par, dim = 2), 
+                margins = c("norm","norm"),
+                paramMargins = list(list(mean = M2$mu[1], sd = sqrt(M2$sigma[1,1])), 
+                                    list(mean = M2$mu[2], sd = sqrt(M2$sigma[2,2]))))
 
 
+# Simulate 10k net returns for M4. The rMvdc() function draws the specified
+# number of sample returns, the values of which are are chosen to match the
+# properties we specified above.
 
-# Simulated returns M4
-n <- 10000 # number of simulations
-rho <- M4$par # correlation parameter Gaussian-Copula
+values <- rMvdc(10000, dist_M4) %>% 
+                as.data.frame()
 
-# Build the bivariate distribution
-dist_M4 <- mvdc(normalCopula(param = rho, dim = 2), margins = c("norm","norm"),
-                paramMargins = list(list(mean = M2$mu[1], sd = sqrt(M2$sigma[1,1])), list(mean = M2$mu[2], sd = sqrt(M2$sigma[2,2]))))
-
-# Sample 1000 observations from the distribution
-rets_M4 <- rMvdc(10000, dist_M4) %>% 
-  as_tibble(.)
-colnames(rets_M4) <- c("AAPL", "TSLA")
-
-# plot results
-p <- ggplot(rets_M4, aes(AAPL, TSLA)) + 
-  geom_point() + 
-  theme(axis.text.x = element_text(size = 14), 
-        axis.text.y = element_text(size = 14)) +
-  xlab("Apple") + ylab("Tesla") + 
-  ggtitle(expression(paste(rho, "=0.5")))
-
-ggExtra::ggMarginal(p, type = "histogram")
-
-pairs.panels(rets_M4)
-
-###########
+colnames(values) <- c("AAPL", "TSLA")
 
 
+# Create xts object with simulated returns from M4. Like the returns from M2,
+# this data will be needed later on in time series format. The code is the same
+# used before.
+
+dates <- seq(as.Date("2013-01-01"), by = "weeks", length.out = 10000)
+rets_M4 <- xts(values, dates)
 
 
+# Compute weighted portfolio for M4. We use the same function and additional
+# arguments as for M1 and M2.
 
-# Estimate 1-week VaR and ES at confidence levels of 90%, 95% and 99%.
-
-
-results_2 <- tibble("alpha" = rep(NA_real_, 3),
-                    "VaR" = rep(NA_real_, 3),
-                    "ES" = rep(NA_real_, 3))
-
-conf <- c(0.9, 0.95, 0.99)
-
-for (i in 1:3) {
-  
-  results_2$alpha[i] <- conf[i]
-  
-  results_2$VaR[i] <- VaR(rets_2, 
-                          p = conf[i], 
-                          method = "historical", 
-                          invert = FALSE)
-  
-  results_2$ES[i] <- ES(rets_2, 
-                        p = conf[i],
-                        method = "historical", 
-                        invert = FALSE, 
-                        operational = FALSE)
-  
-}
+pf_M4 <- Return.portfolio(rets_M4, 
+                          weights = c(0.3, 0.7), 
+                          rebalance_on = "week", 
+                          geometric = TRUE)
 
 
-results_3 <- tibble("alpha" = rep(NA_real_, 3),
-                    "VaR" = rep(NA_real_, 3),
-                    "ES" = rep(NA_real_, 3))
-
-rets_M4 <- xts(rets_M4, date)
-
-
-results_3 <- tibble("alpha" = rep(NA_real_, 3),
-                    "VaR" = rep(NA_real_, 3),
-                    "ES" = rep(NA_real_, 3))
+# Estimate 1-week VaR and ES for both models at confidence levels of 90%, 95%
+# and 99%. The looping approach is same used for M1.
 
 conf <- c(0.9, 0.95, 0.99)
 
-results_3 <- tibble("alpha" = rep(NA_real_, 3),
+results_M2 <- tibble("alpha" = rep(NA_real_, 3),
+                     "VaR" = rep(NA_real_, 3),
+                     "ES" = rep(NA_real_, 3))
+
+results_M4 <- tibble("alpha" = rep(NA_real_, 3),
                     "VaR" = rep(NA_real_, 3),
                     "ES" = rep(NA_real_, 3))
 
 for (i in 1:3) {
   
-  results_3$alpha[i] <- conf[i]
+  results_M2$alpha[i] <- conf[i]
+  results_M2$VaR[i] <- VaR(pf_M2, conf[i])
+  results_M2$ES[i] <- ES(pf_M2, conf[i])
   
-  results_3$VaR[i] <- VaR(rets_M4, 
-                          p = conf[i], 
-                          method = "historical", 
-                          invert = FALSE)
-  
-  results_3$ES[i] <- ES(rets_M4, 
-                        p = conf[i],
-                        method = "historical", 
-                        invert = FALSE, 
-                        operational = FALSE)
+  results_M4$alpha[i] <- conf[i]
+  results_M4$VaR[i] <- VaR(pf_M4, conf[i])
+  results_M4$ES[i] <- ES(pf_M4, conf[i])
   
 }
 
@@ -397,7 +382,7 @@ rm("conf")
 
 
 ################################
-###  (v) VaR ROLLING WINDOW  ###
+###  (v) VaR Rolling Window  ###
 ################################
 
 # Estimate 1-week Value at Risk over 100-day rolling window using models M2 and
@@ -455,4 +440,56 @@ viol_4 <- roll_4[-9901,] %>%
             mutate(Violation = (VaR + pf)<0) %>% 
             select(Violation) %>% 
             summarise(., "Perc. Violations" = sum(Violation)/n())
+
+
+
+###########################################################################
+###########################################################################
+###                                                                     ###
+###                                PLOTS                                ###
+###                                                                     ###
+###########################################################################
+###########################################################################
+
+
+
+
+################################
+###    (iii) VaR M2 & M4     ###
+################################
+
+
+p <- ggplot(rets_M4, aes(AAPL, TSLA)) + 
+          geom_point() + 
+          theme(axis.text.x = element_text(size = 14), 
+                axis.text.y = element_text(size = 14)) +
+          xlab("Apple") + ylab("Tesla") + 
+          ggtitle(expression(paste(rho, "=0.5")))
+
+ggExtra::ggMarginal(p, type = "histogram")
+
+pairs.panels(rets_M4)
+
+
+
+
+get_density <- function(x, y, ...) {
+  dens <- MASS::kde2d(x, y, ...)
+  ix <- findInterval(x, dens$x)
+  iy <- findInterval(y, dens$y)
+  ii <- cbind(ix, iy)
+  return(dens$z[ii])
+}
+
+density <- get_density(rets_M4$AAPL, rets_M4$TSLA)
+
+ggplot(rets_M4, aes(AAPL, TSLA)) + 
+  geom_point() +
+  theme(axis.text.x = element_text(size = 14), 
+        axis.text.y = element_text(size = 14)) +
+  labs(x = "Apple", 
+       y = "Tesla",
+       title = "Net returns, Tesla vs. Apple",
+       subtitle = paste("10'000 simulations from Gaussion copula", rho, "=0.48"))
+
 
