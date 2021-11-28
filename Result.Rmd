@@ -1,0 +1,733 @@
+---
+title: "Group Assignment"
+subtitle: "Quantitative Risk Management"
+author: "Thomas Weiss & Katharina Ruschmann"
+date: "29/11/2021"
+output: pdf_document
+header-includes:
+  - \usepackage{fancyhdr}
+  - \pagestyle{fancy}
+  - \fancyhead[L]{QRM}
+  - \fancyhead[C]{Group Assignment}
+  - \fancyhead[R]{29/11/2021}
+
+---
+
+```{r setup, include=FALSE, , warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+
+
+Goal of the assignment was the assessment of risk, i.e. the estimation of value-at-risk and expected shortfall for the profit and loss distribution of a portfolio with 30% Apple shares and 70% Tesla shares. We considered four different models of return distributions and also analyzed the impact of the number of historical observations N on the estimated value-at-risk and expected shortfall. 
+
+We used R as software, for the estimation of the parameters of the models and for the risk measures we applied several existing packages and functions, which are explained and derived explicitly in the following parts.
+
+
+# 1. Setup
+
+**Loading Packages**
+
+```{r Prerequisites, include=FALSE}
+library(tidyverse)
+library(magrittr)
+library(readxl)
+library(xts)
+library(PerformanceAnalytics)
+library(stats4)
+library(VineCopula)
+library(copula)
+library(Rfast)
+library(MASS)
+library(psych)
+library(gridExtra)
+library(kableExtra)
+```
+
+```{r Prerequisites2, }
+library(tidyverse)
+library(magrittr)
+library(readxl)
+library(xts)
+library(PerformanceAnalytics)
+library(stats4)
+library(VineCopula)
+library(copula)
+library(Rfast)
+library(MASS)
+library(psych)
+library(gridExtra)
+```
+
+
+
+
+**Data import & return calculations**
+
+
+Import data from Excel into R.
+
+
+```{r setup1, }
+data <- read_excel("data.xlsx")
+```
+
+
+
+
+Extract stock prices (as a matrix) and dates (as a vector).
+
+
+```{r setup2, }
+prices <- as.matrix(data[,-1])
+dates <- as.Date(data$Dates)
+```
+
+
+
+
+Create xts (time series) object using price matrix and date vector.
+
+
+```{r setup3, }
+data <- xts(prices, dates)
+```
+
+
+
+
+Create xts time series object net returns from stock price data. For a price
+P(t) in a given period t, Return.calculate() computes the net return using
+[P(t)-P(t-1)]/P/(t-1). The output is a xts object with net returns for all
+stocks in the data set. The second line then removes the first line from this
+object (= NA due to return calculation), and extracts two specific stocks
+which will be needed from here on (AAPL and TSLA).
+
+
+```{r setup4, }
+rets <- Return.calculate(data, method = "discrete")
+rets <- rets[-1, c("AAPL", "TSLA")]
+```
+
+
+
+**Value-at-Risk function**
+
+
+Function to compute VaR. The if() condition first checks the input data type
+and converts it to a vector. The ecdf() function then computes the empirical
+cumulative distribution of this vector. Finally, the last code chunk computes
+VaR by using the definition of the generalized inverse. It subsets the vector
+to only include values for which the cumulative distribution gives at least
+the desired confidence level, and then returns the smallest one.
+
+
+```{r setup5, }
+VaR <- function(x, p) {
+  
+  if(is.xts(x) == TRUE) {
+    
+    x <- x %>% 
+      coredata() %>% 
+      as.vector() 
+    
+  } else {
+    
+    x <- as.vector(x)
+    
+  }
+  
+  Fn <- ecdf(x)
+  
+  x[Fn(x) >= 1-p] %>% 
+    min(.)*(-1) %>% 
+    return()
+  
+}
+```
+
+
+
+**Expected shortfall function**
+
+
+Function to compute ES. The first three chunks are from the VaR formula above.
+However, instead of returning VaR, the function saves it in an object (VAR),
+which is the used to compute the tail conditional expectation (TCE). Finally,
+the last line applies the formula from chapter 3 to compute the expected
+shortfall (ES).
+
+
+```{r setup6, }
+ES <- function(x, p) {
+  
+  if(is.xts(x) == TRUE) {
+    
+    x <- x %>% 
+      coredata() %>% 
+      as.vector() 
+    
+  } else {
+    
+    x <- as.vector(x)
+    
+  }
+  
+  Fn <- ecdf(x)
+  
+  VAR <- x[Fn(x) >= 1-p] %>% 
+    min(.)*(-1)
+  
+  TCE <- -mean(x[x<=-VAR])
+  
+  return(TCE + ((1/(1-p))*(length(x[x<=-VAR])/length(x)) - 1)*(TCE-VAR))
+  
+}
+```
+
+
+
+
+Clean up environment.
+
+
+```{r setup7, }
+rm("data")
+rm("prices")
+rm("dates")
+```
+
+\pagebreak
+
+
+
+# 2. Parameter Computation
+
+**Model 1**
+
+Stock returns with empirical distribution.
+--> No further calculation necessary.
+
+
+```{r models1, }
+M1 <- rets
+```
+
+
+
+**Model 2**
+
+Stock returns with bivariate Gaussian distribution using maximum
+likelihood estimation. If a bivariate set of returns X=(x1, x2) is
+(supposedly) normally distributed, then Y=exp(X) has a multivariate log-normal
+distribution with expectation E[Y_i] = exp(µ_i + 0.5*sigma_ii) and covariance
+matrix Var(Y_ij) = exp(µ_i+µ_j+0.5(sigma_ii+sigma_jj))*(exp(sigma_ij)-1). The mvnorm.mle()
+function applies this assumption to the stock return data and estimates the
+corresponding mean and covariance matrix using MLE-estimation.
+
+
+```{r models2, }
+M2 <- mvnorm.mle(rets)
+
+```
+
+
+
+**Model 3**
+
+Stock returns with bivariate Gaussian distribution and Gumbel-copula. The
+parameters of the bivariate Gaussian are given by M2 (see previous code
+chunk); we therefore still need to get the Gumbel-copula. The first step is to
+find u1 and u2, which we do by computing the normal distribution (using pnorm)
+of the standardizing net returns (using mu and sd from M2). These results are
+then passed to BiCopEst(), where we set family=4 (for Gumbel-copula) and
+method=mle (for MLE estimation). The BiCopEst() function uses u1 and u2 in the
+formula for the Gumbel-copula and uses MLE to estimate the only unknown
+parameter, theta.
+
+
+```{r models3, }
+u1 <- pnorm((rets$AAPL-M2$mu[1])/sqrt(M2$sigma[1,1]))
+u2 <- pnorm((rets$TSLA-M2$mu[2])/sqrt(M2$sigma[2,2]))
+
+M3 <- BiCopEst(u1, u2, family = 1, method = "mle")
+```
+
+
+
+**Model 4**
+
+Stock returns with t-distribution and Gaussian copula. The first step is
+to solve for the epsilon of each stock, which in our case means standardizing net
+returns like in M3 (i.e., we use the parameters from M2). One then needs to
+find the degrees of freedom of each epsilon. This is done in the next two lines. The
+fitdistr() function uses the respective epsilon as input for the standardized
+t-distribution, given by ft,1(x; v) = gamma[(v+1)/2]/[sqrt(vpi)gamma(v/2)]*(1+(x^2)/v)^-[(v+1)/2], 
+and uses MLE to find the only unkown parameter, v. After obtaining estimates
+the two v, we can find u1 and u2. The approach similar to the one in M3, but
+because we have a t-distribution, we use pt() to get the t-distribution and we
+input both epsilon and the respective v. Finally, we use u1 and u2 as input for
+BiCopEst() again, but we set family=1 to compute the parameter (rho) of a
+Gaussian copula.
+
+
+```{r models4, warning=FALSE }
+eps1 <- (rets$AAPL-M2$mu[1])/sqrt(M2$sigma[1,1])
+eps2 <- (rets$TSLA-M2$mu[2])/sqrt(M2$sigma[2,2])
+
+v1 <- fitdistr(eps1, densfun = "t")$estimate[3]
+v2 <- fitdistr(eps2, densfun = "t")$estimate[3]
+
+u1 <- pt(eps1, v1)
+u2 <- pt(eps2, v2)
+
+M4 <- BiCopEst(u1, u2, family = 1, method = "mle")
+```
+
+
+
+Clean up environment.
+
+
+```{r models5, }
+rm("eps1")
+rm("eps2")
+rm("u1")
+rm("u2")
+rm("v1")
+rm("v2")
+```
+
+
+\pagebreak
+
+# 3. Value-at-Risk & Expected Shortfall Computation Model 1
+
+Create portfolio using M1. The Return.portfolio() function computes the
+portfolio returns using a time series object of asset returns. These returns
+are given by the first argument, which in our case contains the empirical net
+return distributions of AAPL and TSLA. The second argument specifies how these
+returns should be weighted when computing portfolio returns. Third one
+indicates that the weighing should take place every week, or in our case every
+observation. Without doing this, weights would be applied in the first row
+only, which is not what we want. Finally, we specify that the (weighted)
+geometric mean should be used. While the latter makes no noticable difference,
+it seems like the more correct way to compute portfolio returns.
+
+
+```{r var11, }
+pf_M1 <- Return.portfolio(M1, 
+                          weights = c(0.3, 0.7), 
+                          rebalance_on = "week", 
+                          geometric = TRUE)
+```
+
+
+
+
+Create 10k simulations using portfolio 1. Since this is just a time series of
+returns, we directly sample from the pf_1 object created above. It has less
+than 10k observations, so we set replace=TRUE.
+
+```{r var12, }
+rets_M1 <- sample(pf_M1, 10000, replace = TRUE)
+```
+
+
+Create empty tibble to store results and vector containing different
+confidence levels.
+
+```{r var13, }
+results_1 <- tibble("alpha" = rep(NA_real_, 3),
+                    "VaR" = rep(NA_real_, 3),
+                    "ES" = rep(NA_real_, 3))
+
+conf <- c(0.9, 0.95, 0.99)
+```
+
+
+
+
+Computing VaR and ES. For every of the three confidence levels, the loop
+computes VaR and ES of the simulated portfolio return series. Both measures
+and the corresponding confidence level are stored in the tibble created
+before.
+
+```{r var14, }
+for (i in 1:3) {
+  
+  results_1$alpha[i] <- conf[i]
+  results_1$VaR[i] <- VaR(rets_M1, p = conf[i])
+  results_1$ES[i] <- ES(rets_M1, p = conf[i])
+  
+}
+
+```
+
+
+Results:
+```{r var17, echo = FALSE}
+kbl(results_1) %>%
+  kable_styling(bootstrap_options = "striped", full_width = F)
+```
+
+
+Value-at-risk is a statistical measure of the riskiness of our portfolio.
+It is defined as the maximum amount expected to be lost over a given time
+horizon, at a pre-defined confidence level.
+For our »Model 1«, where stock returns are distributed according to the empirical
+distribution, we have calculated a one-week VAR of 5.33 percentage points with
+a 90% confidence level, implicating that there is a 90% confidence that over the
+next week the portfolio will not lose more than 5.33 percentage points.
+Consequently, the VAR is increasing with the confidence level. We have calculated
+a 95% confidence and a 99% confidence, that over the next week the portfolio will
+not lose more than 7.7 percentage points and 14.0 percentage points, respectively.
+However, VAR doesn't look into the tail of a distribution and doesn't capture what
+happens when maximum loss with a given confidence lecel (VAR) is violated. That is
+one important pitfall of VAR. Therefore, we also calculated the ES, a popular
+measure of tail risk. The ES is what we expect the loss to be, on average, when
+VAR is violated. If we are measuring VaR at the 90% confidence level, then the
+ES would be the mean loss in the 10% of scenarios the VAR is violated.
+For »Model 1«  for a 90% confidence level, the average loss in the worst 10% of
+cases is 9.18 percentage points. For a 95% confidence level, the average loss in
+the worst 5% of cases is 12.1 percentage points and for a 90% confidence level,
+the average loss in the worst 1% of cases is 18.00 percentage points.
+
+
+Clean up environment.
+
+```{r var15, }
+rm("i")
+rm("conf")
+rm("rets_M1")
+rm("results_1")
+```
+\pagebreak
+
+# 4. Value-at-Risk & Expected Shortfall Computation Model 2 & Model 4
+
+Simulate 10k net returns for M2. The mvrnorm() function generates random
+values for a multivariate Gaussian distribution, given multiple parameters.
+The first one is the number of simulations, namely 10k. The next two are the
+means and the covariance matrix, which have been derived earlier using MLE. To
+preserve the mean and covariance structure, we set empirical = TRUE.
+
+
+```{r var21, }
+values <- mvrnorm(10000, mu = M2$mu, Sigma = M2$sigma, empirical = TRUE) %>% 
+  as.data.frame() 
+```
+
+
+Create xts object with simulated returns from above. While not required here,
+the simulated returns of M2 are also used in question v), where they need to
+be in the form of a time series starting on 1 Jan 2013. Therefore, we create a
+corresponding vector of weekly dates, which is then used together with the
+simulated returns to create a xts object.
+
+
+```{r var22, }
+dates <- seq(as.Date("2013-01-01"), by = "weeks", length.out = 10000)
+rets_M2 <- xts(values, dates)
+```
+
+
+Compute weighted portfolio for M2. We use the same function and additional
+arguments as for M1.
+
+
+```{r var23, }
+pf_M2 <- Return.portfolio(rets_M2, 
+                          weights = c(0.3, 0.7), 
+                          rebalance_on = "week", 
+                          geometric = TRUE)
+```
+
+
+Simulate 10k net returns for M4. The mvdc() function computes parameters for
+the multivariate distribution of a copula, and takes three arguments. The
+first one specifies the copula type, which is Gaussian, to which we can pass
+the rho obtained earlier using MLE, and the dimension, which in our case is
+the number of stocks. The second argument specifies that the distributions of
+both marginals, which we set to normal. Third, we enter two lists, each of
+which contains the desired mean and standard deviation for one of the
+marginals. The values used here are again the MLE estimates from M2, which
+were used initially to compute the correlation parameter of the copula. The
+parameters obtained by this code will contain not just the marginal
+parameters, but also the correlation parameter.
+
+
+```{r var24, }
+dist_M4 <- mvdc(normalCopula(param = M4$par, dim = 2), 
+                margins = c("norm","norm"),
+                paramMargins = list(list(mean = M2$mu[1], sd = sqrt(M2$sigma[1,1])), 
+                                    list(mean = M2$mu[2], sd = sqrt(M2$sigma[2,2]))))
+```
+
+
+
+
+Simulate 10k net returns for M4. The rMvdc() function draws the specified
+number of sample returns, the values of which are are chosen to match the
+properties we specified above.
+
+
+```{r var25, }
+values <- rMvdc(10000, dist_M4) %>% 
+  as.data.frame()
+
+colnames(values) <- c("AAPL", "TSLA")
+```
+
+
+
+
+Create xts object with simulated returns from M4. Like the returns from M2,
+this data will be needed later on in time series format. The code is the same
+used before.
+
+
+```{r var26, }
+dates <- seq(as.Date("2013-01-01"), by = "weeks", length.out = 10000)
+rets_M4 <- xts(values, dates)
+```
+
+
+
+
+Compute weighted portfolio for M4. We use the same function and additional
+arguments as for M1 and M2.
+
+
+```{r var27, }
+pf_M4 <- Return.portfolio(rets_M4, 
+                          weights = c(0.3, 0.7), 
+                          rebalance_on = "week", 
+                          geometric = TRUE)
+```
+
+
+
+
+Estimate 1-week VaR and ES for both models at confidence levels of 90%, 95%
+and 99%. The looping approach is same used for M1.
+
+
+```{r var28, }
+conf <- c(0.9, 0.95, 0.99)
+
+results_M2 <- tibble("alpha" = rep(NA_real_, 3),
+                     "VaR" = rep(NA_real_, 3),
+                     "ES" = rep(NA_real_, 3))
+
+results_M4 <- tibble("alpha" = rep(NA_real_, 3),
+                     "VaR" = rep(NA_real_, 3),
+                     "ES" = rep(NA_real_, 3))
+
+for (i in 1:3) {
+  
+  results_M2$alpha[i] <- conf[i]
+  results_M2$VaR[i] <- VaR(pf_M2, conf[i])
+  results_M2$ES[i] <- ES(pf_M2, conf[i])
+  
+  results_M4$alpha[i] <- conf[i]
+  results_M4$VaR[i] <- VaR(pf_M4, conf[i])
+  results_M4$ES[i] <- ES(pf_M4, conf[i])
+  
+}
+
+```
+
+
+Results:
+```{r var29, echo = FALSE}
+kbl(results_M2) %>%
+  kable_styling(bootstrap_options = "striped", full_width = F)
+
+kbl(results_M4) %>%
+  kable_styling(bootstrap_options = "striped", full_width = F)
+```
+
+
+Clean up environment.
+
+```{r var30, }
+rm("i")
+rm("conf")
+rm("dist_M4")
+rm("values")
+rm("dates")
+```
+\pagebreak
+
+# 5. Value-at-Risk & Expected Shortfall with differnt observation horizon
+
+Compute VaR and ES for last 100, 200, 300 and 400 observations of empirical
+distribution. No confidence level was specified, so we did computed it for
+every level between 80%-99%. Since no specific data was mentioned either, we
+computed both the portfolio and the separate stocks. First, we compute the
+portfolio returns using the same approach as before.
+
+
+```{r varN1, }
+pf_EMP <- Return.portfolio(rets, 
+                           weights = c(0.3, 0.7), 
+                           rebalance_on = "week", 
+                           geometric = TRUE)
+```
+
+
+
+Initialize tibbles for results to be stored.
+
+
+```{r varN2, }
+results_EMP <- tibble("VaR" = rep(NA_real_, 80),
+                      "ES" = rep(NA_real_, 80),
+                      "N" = rep(c(100, 200, 300, 400), 20),
+                      "alpha" = rep(NA_real_, 80))
+
+results_AAPL <- tibble("VaR" = rep(NA_real_, 80),
+                       "ES" = rep(NA_real_, 80),
+                       "N" = rep(c(100, 200, 300, 400), 20),
+                       "alpha" = rep(NA_real_, 80))
+
+results_TSLA <- tibble("VaR" = rep(NA_real_, 80),
+                       "ES" = rep(NA_real_, 80),
+                       "N" = rep(c(100, 200, 300, 400), 20),
+                       "alpha" = rep(NA_real_, 80))
+```
+
+
+
+
+Use loop to compute risk measures for different return series (portfolio,
+AAPL, TSLA), confidence levels (100-i%), and subsets of each series (100*v).
+
+
+```{r varN3, }
+for(i in 1:20) {
+  
+  results_EMP$alpha[c(1:4)+(i-1)*4] <- (1-(i/100))
+  
+  results_AAPL$alpha[c(1:4)+(i-1)*4] <- (1-(i/100))
+  
+  results_TSLA$alpha[c(1:4)+(i-1)*4] <- (1-(i/100))
+  
+  for(v in 1:4) {
+    
+    results_EMP$VaR[v+(i-1)*4] <- VaR(last(pf_EMP, 100*v), (1-(i/100)))
+    results_EMP$ES[v+(i-1)*4] <- ES(last(pf_EMP, 100*v), (1-(i/100)))
+    
+    results_AAPL $VaR[v+(i-1)*4] <- VaR(last(rets[, "AAPL"], 100*v), (1-(i/100)))
+    results_AAPL $ES[v+(i-1)*4] <- ES(last(rets[, "AAPL"], 100*v), (1-(i/100)))
+    
+    results_TSLA$VaR[v+(i-1)*4] <- VaR(last(rets[, "TSLA"], 100*v), (1-(i/100)))
+    results_TSLA$ES[v+(i-1)*4] <- ES(last(rets[, "TSLA"], 100*v), (1-(i/100)))
+    
+  }
+  
+}
+
+```
+
+
+Results:
+```{r varN5, echo = FALSE}
+kbl(results_EMP) %>%
+  kable_styling(bootstrap_options = "striped", full_width = F)
+```
+
+
+Plot results.
+
+```{r varN4, }
+ggplot(results_EMP, aes(x = alpha, group = N)) + 
+  geom_line(aes(y = VaR, color = N), linetype = "dashed") + 
+  geom_line(aes(y = ES, color = N))
+```
+
+\pagebreak
+
+# 6. Number of Value-at-Risk violations
+
+Estimate 1-week Value at Risk over 100-day rolling window using models M2 and
+M4. The rollapply() function applies a specified function on a desired rolling
+window of data. Here, the function is VaR, and we set width = 100 observations
+(=weeks), meaning that e.g. observation 100 will show the VaR from week 1 to
+week 100. Since leaves the first 99 observation as NA, so we then apply
+na.trim() to remove any NAs from the beginning.
+
+
+```{r vio1, }
+roll_M2 <- rollapply(rets_M2, width = 100, FUN = VaR,  p = 0.95) %>%
+  na.trim()
+
+roll_M4 <- rollapply(rets_M4, width = 100, FUN = VaR,  p = 0.95) %>%
+  na.trim()
+```
+
+
+
+
+Compute number of violations using next out-of-sample portfolio return. The
+bracket index subsets the returns to only include such from 25 November, 2014.
+This is day of the 100th week, and the first day in the rolling window time
+series. To compare them, both rolling window and simulated returns must have
+the same dimension. Second, we also create a lag by one week, meaning that the
+values in the time series are shifted up by one while the dates stay the same.
+This is simplify the comparison with the next out-of-sample return in the next
+step.
+
+
+```{r vio2, }
+rets_M2 <- rets_M2["2014-11-25/"] %>% 
+  lag.xts(., -1)
+rets_M4 <- rets_M4["2014-11-25/"] %>% 
+  lag.xts(., -1)
+```
+
+
+Putting both simulated returns and rolling window VaR into a single xts
+object. Also, renaming columns to avoid confusion.
+
+
+```{r vio3, }
+roll_M2 <- cbind(roll_M2, rets_M2)
+roll_M4 <- cbind(roll_M4, rets_M4)
+
+colnames(roll_M2) <- c("x1","x2", "VaR", "pf")
+names(roll_M4) <- c("x1","x2","VaR", "pf")
+```
+
+
+Use newly created time series object to compute number of violations. First,
+we remove the last observation, which contains one NA due the the lagging.
+Next, we extract the values only using coredata, which simply gives a matrix
+without dates as rownames. This is converted to a tibble to be able to apply
+mutate, where we introduce a new variable called "Violation". It is TRUE if
+VaR (which is inverted as usual) plus the portfolio return is negative,
+indicating that the portfolio loss was higher than predicted by VaR. If the
+prediction was correct and VaR lower than the actual return, it will be FALSE.
+After creating this variable, we extract only this single column and create a
+summary measure called "Perc. Violations", which sums up the values in the
+newly created column (TRUE gives 1, FALSE gives 0) and divides them by the
+total number of rows.
+
+
+```{r vio4, eval=FALSE}
+viol_M2 <- roll_M2[-9901,] %>%
+  coredata() %>% 
+  as_tibble() %>% 
+  mutate(Violation = (VaR + pf)<0) %>% 
+  select(Violation) %>% 
+  summarise(., "Perc. Violations" = paste(100*sum(Violation)/n(), "%"))
+
+viol_M4 <- roll_M4[-9901,] %>%
+  coredata() %>% 
+  as_tibble() %>% 
+  mutate(Violation = (VaR + pf)<0) %>% 
+  select(Violation) %>% 
+  summarise(., "Perc. Violations" = paste(100*sum(Violation)/n(), "%"))
+```
