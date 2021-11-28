@@ -429,7 +429,6 @@ for(i in 1:20) {
 }
 
 
-
 # Plot results.
 
 ggplot(results_EMP, aes(x = alpha, group = N)) + 
@@ -445,53 +444,34 @@ ggplot(results_EMP, aes(x = alpha, group = N)) +
 # Estimate 1-week Value at Risk over 100-day rolling window using models M2 and
 # M4.
 
-date <- seq(as.Date("2013-01-01"), by = "week", length.out = 10000)
+roll_M2 <- rollapply(rets_M2, width = 100, FUN = VaR,  p = 0.95) %>%
+            na.trim()
 
-rets_2 <- xts(coredata(rets_2), date)
-
-
-rets_4 <- xts(coredata(rets_M4), date)
-
-
-rets_4 <- Return.portfolio(rets_4, 
-                          weights = c(0.3, 0.7), 
-                          rebalance_on = "week", 
-                          geometric = TRUE)
-
-            
-roll_2 <- rollapply(rets_2, width = 100, FUN = VaR,  p = 0.95, method = "historical", invert = FALSE) %>%
-            na.trim(.)
-
-roll_4 <- rollapply(rets_4, width = 100, FUN = VaR,  p = 0.95, method = "historical", invert = FALSE) %>%
-            na.trim(.)
+roll_M4 <- rollapply(rets_M4, width = 100, FUN = VaR,  p = 0.95) %>%
+            na.trim()
 
 
 # Compute no. of violations using next out-of-sample portfolio return.
 
-
-rets_2 <- rets_2["2014-11-25/"] %>% 
+rets_M2 <- rets_M2["2014-11-25/"] %>% 
               lag.xts(., -1)
+rets_M4 <- rets_M4["2014-11-25/"] %>% 
+  lag.xts(., -1)
 
-roll_2 <- cbind(roll_2, rets_2)
+roll_M2 <- cbind(roll_M2, rets_M2)
+roll_M4 <- cbind(roll_M4, rets_M4)
 
-colnames(roll_2) <- c("VaR", "pf")
-              
-rets_4 <- rets_4["2014-11-25/"] %>% 
-              lag.xts(., -1)
+colnames(roll_M2) <- c("VaR", "pf")
+names(roll_M4) <- c("VaR", "pf")
 
-roll_4 <- cbind(roll_4, rets_4)
-
-names(roll_4) <- c("VaR", "pf")
-
-
-viol_2 <- roll_2[-9901,] %>%
+viol_M2 <- roll_M2[-9901,] %>%
             coredata() %>% 
             as_tibble() %>% 
             mutate(Violation = (VaR + pf)<0) %>% 
             select(Violation) %>% 
             summarise(., "Perc. Violations" = sum(Violation)/n())
             
-viol_4 <- roll_4[-9901,] %>%
+viol_M4 <- roll_M4[-9901,] %>%
             coredata() %>% 
             as_tibble() %>% 
             mutate(Violation = (VaR + pf)<0) %>% 
