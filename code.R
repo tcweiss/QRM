@@ -442,7 +442,11 @@ ggplot(results_EMP, aes(x = alpha, group = N)) +
 ################################
 
 # Estimate 1-week Value at Risk over 100-day rolling window using models M2 and
-# M4.
+# M4. The rollapply() function applies a specified function on a desired rolling
+# window of data. Here, the function is VaR, and we set width = 100 observations
+# (=weeks), meaning that e.g. observation 100 will show the VaR from week 1 to
+# week 100. Since leaves the first 99 observation as NA, so we then apply
+# na.trim() to remove any NAs from the beginning.
 
 roll_M2 <- rollapply(rets_M2, width = 100, FUN = VaR,  p = 0.95) %>%
             na.trim()
@@ -451,12 +455,23 @@ roll_M4 <- rollapply(rets_M4, width = 100, FUN = VaR,  p = 0.95) %>%
             na.trim()
 
 
-# Compute no. of violations using next out-of-sample portfolio return.
+# Compute number of violations using next out-of-sample portfolio return. The
+# bracket index subsets the returns to only include such from 25 November, 2014.
+# This is day of the 100th week, and the first day in the rolling window time
+# series. To compare them, both rolling window and simulated returns must have
+# the same dimension. Second, we also create a lag by one week, meaning that the
+# values in the time series are shifted up by one while the dates stay the same.
+# This is simplify the comparison with the next out-of-sample return in the next
+# step.
 
 rets_M2 <- rets_M2["2014-11-25/"] %>% 
               lag.xts(., -1)
 rets_M4 <- rets_M4["2014-11-25/"] %>% 
-  lag.xts(., -1)
+              lag.xts(., -1)
+
+
+# Putting both simulated returns and rolling window VaR into a single xts
+# object. Also, renaming columns to avoid confusion.
 
 roll_M2 <- cbind(roll_M2, rets_M2)
 roll_M4 <- cbind(roll_M4, rets_M4)
@@ -464,19 +479,36 @@ roll_M4 <- cbind(roll_M4, rets_M4)
 colnames(roll_M2) <- c("VaR", "pf")
 names(roll_M4) <- c("VaR", "pf")
 
+
+# Use newly created time series object to compute number of violations. First,
+# we remove the last observation, which contains one NA due the the lagging.
+# Next, we extract the values only using coredata, which simply gives a matrix
+# without dates as rownames. This is converted to a tibble to be able to apply
+# mutate, where we introduce a new variable called "Violation". It is TRUE if
+# VaR (which is inverted as usual) plus the portfolio return is negative,
+# indicating that the portfolio loss was higher than predicted by VaR. If the
+# prediction was correct and VaR lower than the actual return, it will be FALSE.
+# After creating this variable, we extract only this single column and create a
+# summary measure called "Perc. Violations", which sums up the values in the
+# newly created column (TRUE gives 1, FALSE gives 0) and divides them by the
+# total number of rows.
+
 viol_M2 <- roll_M2[-9901,] %>%
             coredata() %>% 
             as_tibble() %>% 
             mutate(Violation = (VaR + pf)<0) %>% 
             select(Violation) %>% 
-            summarise(., "Perc. Violations" = sum(Violation)/n())
+            summarise(., "Perc. Violations" = paste(100*sum(Violation)/n(), "%"))
             
 viol_M4 <- roll_M4[-9901,] %>%
             coredata() %>% 
             as_tibble() %>% 
             mutate(Violation = (VaR + pf)<0) %>% 
             select(Violation) %>% 
-            summarise(., "Perc. Violations" = sum(Violation)/n())
+            summarise(., "Perc. Violations" = paste(100*sum(Violation)/n(), "%"))
+
+
+
 
 
 
