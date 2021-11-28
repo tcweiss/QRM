@@ -1,0 +1,41 @@
+---
+title: "Group Assignment"
+subtitle: "Quantitative Risk Management"
+author: "Thomas Weiss & Katharina Ruschmann"
+date: "29/11/2021"
+output: pdf_document
+header-includes:
+  - \usepackage{fancyhdr}
+  - \pagestyle{fancy}
+  - \fancyhead[L]{QRM}
+  - \fancyhead[C]{Group Assignment}
+  - \fancyhead[R]{29/11/2021}
+
+---
+
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+
+```
+
+
+## Loading Packages
+
+```{r Prerequisites}
+
+library(tidyverse)
+
+```
+
+
+\pagebreak
+
+
+
+# Section 1
+
+
