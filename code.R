@@ -254,7 +254,6 @@ for (i in 1:3) {
 rm("i")
 rm("conf")
 rm("rets_M1")
-rm("pf_M1")
 rm("results_1")
 
 
@@ -364,20 +363,78 @@ for (i in 1:3) {
 
 rm("i")
 rm("conf")
-
+rm("dist_M4")
+rm("values")
+rm("dates")
 
 
 ################################
 ###        (iv) VaR N        ###
 ################################
 
+# Compute VaR and ES for last 100, 200, 300 and 400 observations of empirical
+# distribution. No confidence level was specified, so we did computed it for
+# every level between 80%-99%. Since no specific data was mentioned either, we
+# computed both the portfolio and the separate stocks. First, we compute the
+# portfolio returns using the same approach as before.
 
-# Create subsets with last 100, 200, 300 and 400 observations.
+pf_EMP <- Return.portfolio(rets, 
+                           weights = c(0.3, 0.7), 
+                           rebalance_on = "week", 
+                           geometric = TRUE)
+
+
+# Initialize tibbles for results to be stored.
+
+results_EMP <- tibble("VaR" = rep(NA_real_, 80),
+                      "ES" = rep(NA_real_, 80),
+                      "N" = rep(c(100, 200, 300, 400), 20),
+                      "alpha" = rep(NA_real_, 80))
+
+results_AAPL <- tibble("VaR" = rep(NA_real_, 80),
+                       "ES" = rep(NA_real_, 80),
+                       "N" = rep(c(100, 200, 300, 400), 20),
+                       "alpha" = rep(NA_real_, 80))
+
+results_TSLA <- tibble("VaR" = rep(NA_real_, 80),
+                       "ES" = rep(NA_real_, 80),
+                       "N" = rep(c(100, 200, 300, 400), 20),
+                       "alpha" = rep(NA_real_, 80))
+
+
+# Use loop to compute risk measures for different return series (portfolio,
+# AAPL, TSLA), confidence levels (100-i%), and subsets of each series (100*v).
+
+for(i in 1:20) {
+  
+  results_EMP$alpha[c(1:4)+(i-1)*4] <- (1-(i/100))
+  
+  results_AAPL$alpha[c(1:4)+(i-1)*4] <- (1-(i/100))
+  
+  results_TSLA$alpha[c(1:4)+(i-1)*4] <- (1-(i/100))
+  
+  for(v in 1:4) {
+    
+    results_EMP$VaR[v+(i-1)*4] <- VaR(last(pf_EMP, 100*v), (1-(i/100)))
+    results_EMP$ES[v+(i-1)*4] <- ES(last(pf_EMP, 100*v), (1-(i/100)))
+    
+    results_AAPL $VaR[v+(i-1)*4] <- VaR(last(rets[, "AAPL"], 100*v), (1-(i/100)))
+    results_AAPL $ES[v+(i-1)*4] <- ES(last(rets[, "AAPL"], 100*v), (1-(i/100)))
+    
+    results_TSLA$VaR[v+(i-1)*4] <- VaR(last(rets[, "TSLA"], 100*v), (1-(i/100)))
+    results_TSLA$ES[v+(i-1)*4] <- ES(last(rets[, "TSLA"], 100*v), (1-(i/100)))
+    
+  }
+  
+}
 
 
 
-# Estimate Value at Risk (again use 1-week VaR?).
+# Plot results.
 
+ggplot(results_EMP, aes(x = alpha, group = N)) + 
+  geom_line(aes(y = VaR, color = N), linetype = "dashed") + 
+  geom_line(aes(y = ES, color = N))
 
 
 
