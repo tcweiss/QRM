@@ -549,6 +549,13 @@ kbl(results_M4) %>%
   kable_styling(bootstrap_options = "striped", full_width = F)
 ```
 
+In this section we calculated the VaR and ES for »Model 2« and «Model 4«.
+In »Model 2« we assume normally distributed stock returns and in «Model 4« we
+assume t-distributed stock returns with a Gaussian Copula.The VaR as well as the
+ES is higher for «Model 4« than for »Model 2«, indicating that the two stock
+returns are positively correlated, as the Gaussian Copula also takes the joint
+distribution into account. 
+
 
 Clean up environment.
 
